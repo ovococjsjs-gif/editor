@@ -24,7 +24,16 @@ NORMS = {
     'triad': (10, 'триада «факт. факт. вывод.»'),
 }
 SHORT_REPLICA_MAX = 0.45   # доля реплик <= 3 слов
-THIRDS_RATIO = 4.0         # во сколько раз густая треть гуще пустой
+
+# Равномерность считается ТОЛЬКО по дефектным осям и ТОЛЬКО как перегрев
+# густой трети. Прежняя версия делила густую треть на пустую и потому
+# ругалась на вычищенную треть: у Глава_02_wip первая треть дала 0 находок
+# и отношение ушло в бесконечность. Дефект — сгущение, а не чистота.
+# Плотность нормируется на абзацы наррации: в диалоговой сцене абзацев
+# наррации меньше, и абсолютный счёт занижен не по делу.
+THIRDS_KEYS = ('said_this', 'like_general', 'without_noun',
+               'earlier_than', 'and_it_was')
+THIRDS_HOT = 2.2           # во сколько раз густая треть гуще средней по главе
 THIRDS_MIN_N = 12          # ниже этого числа находок треть не считаем
 
 RE_SAID_THIS = re.compile(
@@ -135,15 +144,43 @@ def short_replicas(paras):
     return len(bodies), short / len(bodies)
 
 
-def thirds(hits, total):
-    """Распределение всех находок по третям главы."""
+def thirds(hits, total, keys=None):
+    """Распределение находок по третям главы.
+
+    keys=None — все оси (для отчёта); THIRDS_KEYS — только дефектные.
+    """
     if not total:
         return (0, 0, 0)
     b = [0, 0, 0]
-    for k in hits:
+    for k in (keys if keys is not None else hits):
         for i, _ in hits[k]:
             b[min(2, (i - 1) * 3 // total)] += 1
     return tuple(b)
+
+
+def narration_thirds(paras):
+    """Абзацы наррации по третям — знаменатель для плотности."""
+    n = len(paras)
+    b = [0, 0, 0]
+    for i, p in enumerate(paras, start=1):
+        if not T.is_replica(p):
+            b[min(2, (i - 1) * 3 // n)] += 1
+    return b
+
+
+def hot_third(paras, hits):
+    """(находки, во сколько раз густая треть гуще средней по главе).
+
+    Односторонняя проверка: ловит сгущение дефектов, не чистоту.
+    """
+    n = len(paras)
+    b = thirds(hits, n, THIRDS_KEYS)
+    nar = narration_thirds(paras)
+    avg = sum(b) / max(sum(nar), 1)
+    if not avg:
+        return b, 0.0
+    dens = [b[k] / max(nar[k], 1) for k in range(3)]
+    return b, max(dens) / avg
 
 
 def report(path, show=False):
@@ -165,13 +202,16 @@ def report(path, show=False):
     print('%-34s <= %-5s %.0f%% (%d реплик) %s'
           % ('реплик <= 3 слов', '%.0f%%' % (SHORT_REPLICA_MAX * 100),
              frac * 100, tot, flag))
-    t = thirds(hits, len(paras))
+    t, hot = hot_third(paras, hits)
     if sum(t) < THIRDS_MIN_N:
-        flag = 'ok'
+        flag = 'ok (мало находок)'
+    elif hot > THIRDS_HOT:
+        flag = 'сгущение'
+        bad += 1
     else:
-        flag = 'ok' if max(t) <= THIRDS_RATIO * max(min(t), 1) else 'перекос'
-    print('%-34s %-8s %d / %d / %d %s'
-          % ('находки по третям', 'ровно', t[0], t[1], t[2], flag))
+        flag = 'ok'
+    print('%-34s <= %-5.1f %d / %d / %d  x%.1f %s'
+          % ('дефекты в одной трети', THIRDS_HOT, t[0], t[1], t[2], hot, flag))
 
     if show:
         for k, (limit, label) in NORMS.items():
