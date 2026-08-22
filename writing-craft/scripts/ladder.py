@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Лесенка: диалог, рассыпавшийся в лестницу коротких обменов.
+"""Диагностика серий коротких реплик («лесенок»).
 
 Серия — 4+ подряд идущих реплик, где средняя длина тела <= 9 слов
-и не меньше 60% реплик короче 12 слов.
+и не меньше 60% реплик короче 12 слов. Скрипт показывает концентрацию, но не
+решает, оправдан ли ритм сценой. По умолчанию возвращает 0; ``--strict`` даёт
+ненулевой код при выходе за исторические верхние ориентиры.
 
-    python3 ladder.py <файл.docx|txt> [--list]
+    python3 ladder.py <файл.docx|txt> [--list] [--strict]
 """
 import sys
 import os
@@ -17,12 +19,10 @@ AVG_MAX = 9
 SHORT_W = 12
 SHORT_FRAC = 0.6
 
-SERIES_MAX = 6        # норма длины серии
-SERIES_BLOCK = 8      # блокер
-FRAC_MAX = 0.40       # доля реплик внутри лесенок
-FRAC_BLOCK = 0.50
-LONG_REPLICA = 40     # реплик такой длины нужно >= 3 на главу
-LONG_MIN = 3
+SERIES_MAX = 6        # исторический ориентир длины серии
+FRAC_MAX = 0.40       # исторический ориентир доли реплик в лесенках
+LONG_REPLICA = 40     # справочный срез длинных реплик
+LONG_CORPUS = (23, 10)  # факты двух принятых глав, не квота
 
 
 def runs(paras):
@@ -71,17 +71,15 @@ def report(path, show=False):
     print('\n=== %s ===' % os.path.basename(path))
     print('реплик всего            %d' % total)
     print('лесенок                 %d' % len(lads))
-    print('реплик внутри лесенок   %d (%.0f%%)  норма <=40%%  %s'
+    print('реплик внутри лесенок   %d (%.0f%%)  ориентир <=40%%  %s'
           % (inside, frac * 100,
-             'ok' if frac <= FRAC_MAX else
-             ('превышение' if frac <= FRAC_BLOCK else 'БЛОКЕР')))
-    print('самая длинная серия     %d  норма <=%d  %s'
+             'в пределах' if frac <= FRAC_MAX else 'ПРОВЕРИТЬ'))
+    print('самая длинная серия     %d  ориентир <=%d  %s'
           % (longest, SERIES_MAX,
-             'ok' if longest <= SERIES_MAX else
-             ('превышение' if longest <= SERIES_BLOCK else 'БЛОКЕР')))
-    print('реплик по %d+ слов       %d  норма >=%d  %s'
-          % (LONG_REPLICA, len(long_replicas), LONG_MIN,
-             'ok' if len(long_replicas) >= LONG_MIN else 'НЕДОБОР'))
+             'в пределах' if longest <= SERIES_MAX else 'ПРОВЕРИТЬ'))
+    print('реплик по %d+ слов       %d  справочно (главы 1/2: %d/%d)'
+          % (LONG_REPLICA, len(long_replicas),
+             LONG_CORPUS[0], LONG_CORPUS[1]))
 
     if show:
         for run in lads:
@@ -89,7 +87,9 @@ def report(path, show=False):
                   % (len(run), run[0][0], run[-1][0]))
             for i, b in run:
                 print('  %4d  (%2d) %s' % (i, T.wc(b), b[:110]))
-    bad = frac > FRAC_MAX or longest > SERIES_MAX or len(long_replicas) < LONG_MIN
+    # Недобор длинных реплик не является дефектом: их нельзя дописывать ради
+    # числа. Строгий режим учитывает только концентрацию коротких серий.
+    bad = frac > FRAC_MAX or longest > SERIES_MAX
     return 1 if bad else 0
 
 
@@ -97,4 +97,4 @@ if __name__ == '__main__':
     rc = 0
     for p in T.argv_paths():
         rc += report(p, T.verbose())
-    sys.exit(1 if rc else 0)
+    sys.exit(1 if rc and T.strict() else 0)

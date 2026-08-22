@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Тики второго класса: однообразие хорошего приёма.
+"""Конкорданс возможных тиков второго класса.
 
-Ловит не ошибку, а превышение потолка. Каждая находка по отдельности
-законна; блокирует их количество.
+Регулярки находят формальные приближения, а не доказывают литературный дефект.
+По умолчанию скрипт только печатает отчёт и возвращает 0. ``--strict`` даёт
+ненулевой код при выходе за исторические ориентиры; применять его можно для
+сравнения версий, но не как автоматический литературный блокер.
 
-    python3 tics.py <файл.docx|txt> [--list]
+    python3 tics.py <файл.docx|txt> [--list] [--strict]
 """
 import re
 import sys
@@ -187,16 +189,17 @@ def report(path, show=False):
     paras = T.load(path)
     hits = scan(paras)
     print('\n=== %s (%d абз.) ===' % (os.path.basename(path), len(paras)))
-    print('%-34s %-8s %s' % ('ось', 'норма', 'факт'))
+    print('%-34s %-8s %s' % ('ось', 'ориентир', 'факт'))
     bad = 0
     for k, (limit, label) in NORMS.items():
         n = len(hits[k])
-        flag = 'ok' if n <= limit else 'БЛОКЕР'
+        flag = 'в пределах ориентира' if n <= limit else 'ПРОВЕРИТЬ'
         if n > limit:
             bad += 1
         print('%-34s <= %-5d %d %s' % (label, limit, n, flag))
     tot, frac = short_replicas(paras)
-    flag = 'ok' if frac <= SHORT_REPLICA_MAX else 'БЛОКЕР'
+    flag = ('в пределах ориентира' if frac <= SHORT_REPLICA_MAX
+            else 'ПРОВЕРИТЬ')
     if frac > SHORT_REPLICA_MAX:
         bad += 1
     print('%-34s <= %-5s %.0f%% (%d реплик) %s'
@@ -204,12 +207,12 @@ def report(path, show=False):
              frac * 100, tot, flag))
     t, hot = hot_third(paras, hits)
     if sum(t) < THIRDS_MIN_N:
-        flag = 'ok (мало находок)'
+        flag = 'справочно (мало находок)'
     elif hot > THIRDS_HOT:
-        flag = 'сгущение'
+        flag = 'ПРОВЕРИТЬ СГУЩЕНИЕ'
         bad += 1
     else:
-        flag = 'ok'
+        flag = 'в пределах ориентира'
     print('%-34s <= %-5.1f %d / %d / %d  x%.1f %s'
           % ('дефекты в одной трети', THIRDS_HOT, t[0], t[1], t[2], hot, flag))
 
@@ -226,4 +229,5 @@ if __name__ == '__main__':
     rc = 0
     for p in T.argv_paths():
         rc += report(p, T.verbose())
-    sys.exit(1 if rc else 0)
+    # Литературная эвристика по умолчанию не является блокером процесса.
+    sys.exit(1 if rc and T.strict() else 0)

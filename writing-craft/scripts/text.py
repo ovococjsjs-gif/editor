@@ -19,7 +19,8 @@ def load(path):
     if path.lower().endswith('.docx'):
         raw = _from_docx(path)
     else:
-        raw = open(path, encoding='utf-8').read().split('\n')
+        with open(path, encoding='utf-8') as fh:
+            raw = fh.read().split('\n')
     out = []
     for line in raw:
         line = line.replace(NBSP, ' ').strip()
@@ -113,10 +114,20 @@ def scenes(paras, marker=re.compile(r'^[\s*•·—-]{3,}$')):
 def argv_paths():
     paths = [a for a in sys.argv[1:] if not a.startswith('-')]
     if not paths:
-        print('использование: %s <файл.docx|txt> [...] [--list]' % sys.argv[0])
+        print('использование: %s <файл.docx|txt> [...] [--list] [--strict]'
+              % sys.argv[0])
         sys.exit(2)
     return paths
 
 
 def verbose():
     return '--list' in sys.argv or '-l' in sys.argv
+
+
+def strict():
+    """В строгом режиме диагностические превышения дают ненулевой код.
+
+    По умолчанию инструменты только печатают отчёт: эвристика не должна
+    блокировать литературный текст без редакторского чтения.
+    """
+    return '--strict' in sys.argv

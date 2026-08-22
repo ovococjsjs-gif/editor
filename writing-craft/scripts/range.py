@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Квоты на разнообразие: то, чего в главе должно БЫТЬ.
+"""Описательный профиль диапазона текста.
 
-Все прочие детекторы ищут превышение. Этот ищет недобор — то есть
-сужение палитры, из-за которого текст, безупречный в каждой строке,
-читается ровно и не запоминается.
+Считает несколько грубых маркеров регистров, телесной и средовой лексики,
+сомнения POV, неудавшихся действий и начал абзацев. Эти числа не являются
+обязательной комплектацией главы. По умолчанию скрипт только печатает отчёт;
+``--strict`` даёт ненулевой код лишь при резком однообразии начал абзацев.
 
-    python3 range.py <файл.docx|txt> [--list]
+    python3 range.py <файл.docx|txt> [--list] [--strict]
 """
 import re
 import sys
@@ -28,10 +29,10 @@ RE_SUMMARY = re.compile(
     r'до\s+сих\s+пор|всегда|никогда\s+не|второй\s+год|третий\s+год)\b', re.I)
 
 RE_COUNT_POV = re.compile(
-    r'\b(я\s+(?:по)?считала|я\s+насчитала|я\s+отмерила|шагов|ступен|'
-    r'я\s+знала,?\s+что|я\s+прикинула|в\s+уме|сажен)\b', re.I)
+    r'\b(я\s+(?:по)?считала|я\s+насчитала|я\s+отсчитала|я\s+отмерила|'
+    r'я\s+прикинула|считала\s+про\s+себя|в\s+уме|шагов|ступен)\w*', re.I)
 
-# --- обязательные элементы -------------------------------------------------
+# --- описательные маркеры --------------------------------------------------
 RE_ELLIPSIS = re.compile(r'\.\.\.|…')
 
 RE_ENV_BODY = re.compile(
@@ -55,12 +56,13 @@ RE_FAILED_ACTION = re.compile(
 HEAD_TOP3_MAX = 0.34
 HEAD_RUN_MAX = 3
 
-QUOTAS = [
-    ('реплики 40+ слов',        3,  None),
-    ('многоточие-обрыв',        3,  RE_ELLIPSIS),
-    ('среда входит в тело',     6,  RE_ENV_BODY),
-    ('POV не ручается',         4,  RE_POV_DOUBT),
-    ('действие не удалось',     2,  RE_FAILED_ACTION),
+FEATURES = [
+    # Пара чисел — факты двух принятых глав, а не нижняя граница для нового текста.
+    ('реплики 40+ слов',              (23, 10), None),
+    ('многоточие в абзаце',           (17, 9), RE_ELLIPSIS),
+    ('лексика среды или тела',         (72, 62), RE_ENV_BODY),
+    ('лексические маркеры сомнения',   (19, 12), RE_POV_DOUBT),
+    ('лексика неудавшегося действия',  (3, 8), RE_FAILED_ACTION),
 ]
 
 
@@ -115,24 +117,22 @@ def report(path, show=False):
     n = len(paras)
     print('\n=== %s (%d абз.) ===' % (os.path.basename(path), n))
 
-    print('\n-- регистры подачи (нужны все четыре)')
+    print('\n-- предполагаемые регистры подачи (справочно)')
     reg = registers(paras)
     for name in ('прямая речь', 'косвенная речь', 'сводка-пересказ', 'внутренний счёт'):
         c = reg.get(name, 0)
-        print('  %-18s %4d  %s' % (name, c, 'ok' if c else 'НЕТ ВОВСЕ'))
+        print('  %-18s %4d' % (name, c))
 
-    print('\n-- квоты (минимум на главу)')
+    print('\n-- маркеры диапазона (не обязательные квоты)')
     bad = 0
-    for label, need, rx in QUOTAS:
+    for label, corpus_values, rx in FEATURES:
         if rx is None:
             c = sum(1 for p in paras
                     if T.is_replica(p) and T.wc(T.replica_body(p)) >= 40)
         else:
             c = sum(1 for p in paras if rx.search(p))
-        ok = c >= need
-        if not ok:
-            bad += 1
-        print('  %-24s >= %-3d %4d  %s' % (label, need, c, 'ok' if ok else 'НЕДОБОР'))
+        print('  %-34s %4d  (главы 1/2: %d/%d)'
+              % (label, c, corpus_values[0], corpus_values[1]))
 
     print('\n-- начала абзацев наррации')
     heads, seq = opening_variety(paras)
@@ -145,11 +145,11 @@ def report(path, show=False):
     ok3 = top3 <= HEAD_TOP3_MAX
     okr = run <= HEAD_RUN_MAX
     print('  %-24s <= %-3.0f%% %3.0f%%  %s'
-          % ('доля трёх верхних', HEAD_TOP3_MAX * 100, top3 * 100,
-             'ok' if ok3 else 'ОДНООБРАЗНО'))
+          % ('ориентир трёх верхних', HEAD_TOP3_MAX * 100, top3 * 100,
+             'в пределах' if ok3 else 'ПРОВЕРИТЬ'))
     print('  %-24s <= %-3d %4d  %s'
-          % ('подряд с одного слова', HEAD_RUN_MAX, run,
-             'ok' if okr else 'НАБЕГАНИЕ'))
+          % ('ориентир серии начал', HEAD_RUN_MAX, run,
+             'в пределах' if okr else 'ПРОВЕРИТЬ'))
     if not ok3:
         bad += 1
     if not okr:
@@ -158,8 +158,8 @@ def report(path, show=False):
     sl = scene_lengths(paras)
     if len(sl) > 1:
         print('\n-- сцены: %d, абзацев %s' % (len(sl), ' / '.join(map(str, sl))))
-        if len(set(sl)) > 1 and max(sl) <= 1.5 * min(sl):
-            print('  сцены одного размера — проверить, не идут ли все по одной схеме')
+        if min(sl) and max(sl) <= 1.5 * min(sl):
+            print('  близкий размер сцен — посмотреть, намерен ли общий ритм')
 
     if show:
         print('\n-- реплики 40+ слов')
@@ -173,4 +173,4 @@ if __name__ == '__main__':
     rc = 0
     for p in T.argv_paths():
         rc += report(p, T.verbose())
-    sys.exit(1 if rc else 0)
+    sys.exit(1 if rc and T.strict() else 0)
